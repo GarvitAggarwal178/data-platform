@@ -10,10 +10,10 @@ A fully containerised end-to-end data platform that ingests public financial dat
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Docker Network                           │
 │                                                                 │
-│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐  │
-│  │  Airflow │───▶│ Postgres │◀───│   dbt    │    │   API    │  │
-│  │ (8080)   │    │ (5433)   │    │          │    │  (8000)  │  │
-│  └──────────┘    └──────────┘    └──────────┘    └──────────┘  │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐   │
+│  │  Airflow │───▶│ Postgres │◀──│   dbt    │    │   API    │   │
+│  │ (8080)   │    │ (5433)   │    │          │    │  (8000)  │   │
+│  └──────────┘    └──────────┘    └──────────┘    └──────────┘   │
 │       │               │                               │         │
 │  Ingest DAGs     staging + warehouse            FastAPI +       │
 │  run at 07:00    schemas in Postgres            SQLAlchemy      │
@@ -23,10 +23,10 @@ A fully containerised end-to-end data platform that ingests public financial dat
 │                                               │  (3000)  │      │
 │                                               └──────────┘      │
 │                                               React + Recharts  │
-│                                                                  │
-│  ┌──────────┐                                                    │
+│                                                                 │
+│  ┌──────────┐                                                   │
 │  │ Metabase │  (3001)  — optional BI tool                       │
-│  └──────────┘                                                    │
+│  └──────────┘                                                   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
