@@ -75,3 +75,9 @@ CREATE TABLE staging.raw_sec_edgar (
     ingested_at     TIMESTAMP DEFAULT NOW(),
     raw_payload     JSONB
 );
+
+CREATE TABLE IF NOT EXISTS staging.ingestion_log (
+    source           VARCHAR(100) PRIMARY KEY,
+    last_ingested_at TIMESTAMP,
+    rows_inserted    INT
+);
