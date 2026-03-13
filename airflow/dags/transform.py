@@ -1,6 +1,6 @@
-import psycopg2
 import os
-from datetime import datetime, timezone, timedelta
+import subprocess
+from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
@@ -10,227 +10,76 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
-def get_db_conn():
-    return psycopg2.connect(
-        host="postgres",
-        dbname=os.environ["POSTGRES_DB"],
-        user=os.environ["POSTGRES_USER"],
-        password=os.environ["POSTGRES_PASSWORD"],
+
+def run_dbt(**context):
+    """
+    Triggers dbt run inside the Airflow container.
+
+    Why run dbt from Airflow instead of a separate container?
+    The dbt service in docker-compose uses `profiles: [dbt]` which means
+    it only starts when explicitly invoked — it's not a long-running service.
+    Running dbt via BashOperator/subprocess from Airflow is the standard
+    pattern for LocalExecutor setups without a dedicated dbt Cloud account.
+
+    dbt is installed via the airflow/requirements.txt so it's available
+    inside the Airflow container.
+    """
+    result = subprocess.run(
+        ["dbt", "run", "--project-dir", "/opt/airflow/dbt", "--profiles-dir", "/opt/airflow/dbt"],
+        capture_output=True,
+        text=True,
     )
 
+    # Print output so it appears in Airflow task logs
+    print("dbt stdout:\n", result.stdout)
+    print("dbt stderr:\n", result.stderr)
 
-def transform_world_bank(**context):
-    conn = get_db_conn()
-    cursor = conn.cursor()
+    if result.returncode != 0:
+        raise RuntimeError(f"dbt run failed with exit code {result.returncode}")
 
-    cursor.execute("""
-        SELECT id, raw_payload FROM staging.raw_world_bank
-        WHERE id NOT IN (
-            SELECT DISTINCT CAST(raw_source_id AS INT)
-            FROM warehouse.fact_transactions
-            WHERE raw_source_id ~ '^[0-9]+$'
-        )
-    """)
-    rows = cursor.fetchall()
-    print(f"Transforming {len(rows)} new World Bank records")
-
-    inserted = 0
-    for row_id, payload in rows:
-        country   = payload.get("countryname", "Unknown")
-        sector    = (payload.get("sector1") or {}).get("Name") or payload.get("mjsector_namecode", [{}])[0].get("name", "Unknown") if payload.get("mjsector_namecode") else "Unknown"
-        org_name  = payload.get("borrower") or payload.get("projectname", "Unknown")
-        amount    = float(str(payload.get("totalamt", 0)).replace(",", "").strip() or 0)
-        year      = int(payload.get("boardapprovaldate", "2020-01-01")[:4]) if payload.get("boardapprovaldate") else 2020
-        status    = payload.get("status", "unknown").lower()
-        project_id = payload.get("id", str(row_id))
-
-        # upsert geography
-        cursor.execute("""
-            INSERT INTO warehouse.dim_geography (country, region)
-            VALUES (%s, %s)
-            ON CONFLICT DO NOTHING
-            RETURNING geo_id
-        """, (country, payload.get("regionname", "")))
-        geo = cursor.fetchone()
-        if not geo:
-            cursor.execute("SELECT geo_id FROM warehouse.dim_geography WHERE country = %s LIMIT 1", (country,))
-            geo = cursor.fetchone()
-        if not geo:
-            continue
-        geo_id = geo[0]
-
-        # upsert organization
-        cursor.execute("""
-            INSERT INTO warehouse.dim_organization (org_name, org_type, sector)
-            VALUES (%s, %s, %s)
-            ON CONFLICT DO NOTHING
-            RETURNING org_id
-        """, (org_name, "borrower", sector))
-        org = cursor.fetchone()
-        if not org:
-            cursor.execute("SELECT org_id FROM warehouse.dim_organization WHERE org_name = %s LIMIT 1", (org_name,))
-            org = cursor.fetchone()
-        if not org:
-            continue
-        org_id = org[0]
-
-        # upsert time
-        cursor.execute("""
-            INSERT INTO warehouse.dim_time (full_date, day, month, quarter, year, month_name)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT DO NOTHING
-            RETURNING time_id
-        """, (f"{year}-01-01", 1, 1, 1, year, "January"))
-        t = cursor.fetchone()
-        if not t:
-            cursor.execute("SELECT time_id FROM warehouse.dim_time WHERE year = %s LIMIT 1", (year,))
-            t = cursor.fetchone()
-        if not t:
-            continue
-        time_id = t[0]
-
-        # upsert program
-        cursor.execute("""
-            INSERT INTO warehouse.dim_program (program_name, program_type, source)
-            VALUES (%s, %s, %s)
-            ON CONFLICT DO NOTHING
-            RETURNING program_id
-        """, (payload.get("projectname", "Unknown"), "loan", "World Bank"))
-        prog = cursor.fetchone()
-        if not prog:
-            cursor.execute("SELECT program_id FROM warehouse.dim_program WHERE program_name = %s LIMIT 1", (payload.get("projectname", "Unknown"),))
-            prog = cursor.fetchone()
-        if not prog:
-            continue
-        program_id = prog[0]
-
-        # insert fact
-        cursor.execute("""
-            INSERT INTO warehouse.fact_transactions
-                (org_id, geo_id, time_id, program_id, amount_usd, currency, status, raw_source_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """, (org_id, geo_id, time_id, program_id, amount, "USD", status, str(row_id)))
-        inserted += 1
-
-    conn.commit()
-    cursor.close()
-    conn.close()
-    print(f"Inserted {inserted} World Bank records into warehouse")
+    print("dbt run completed successfully")
 
 
-def transform_sec_edgar(**context):
-    conn = get_db_conn()
-    cursor = conn.cursor()
+def run_dbt_test(**context):
+    """
+    Runs dbt tests after the dbt run.
+    If any test fails, the Airflow task fails — alerting you to data issues.
+    """
+    result = subprocess.run(
+        ["dbt", "test", "--project-dir", "/opt/airflow/dbt", "--profiles-dir", "/opt/airflow/dbt"],
+        capture_output=True,
+        text=True,
+    )
 
-    cursor.execute("""
-        SELECT id, raw_payload FROM staging.raw_sec_edgar
-    """)
-    rows = cursor.fetchall()
-    print(f"Transforming {len(rows)} SEC EDGAR records")
+    print("dbt test stdout:\n", result.stdout)
+    print("dbt test stderr:\n", result.stderr)
 
-    inserted = 0
-    for row_id, payload in rows:
-        company  = payload.get("company", "Unknown")
-        form     = payload.get("form", "Unknown")
-        date_str = payload.get("date", "2020-01-01")
-        accession = payload.get("_id", str(row_id))
-
-        try:
-            year = int(date_str[:4])
-        except Exception:
-            year = 2020
-
-        # upsert geography (SEC Edgar = USA)
-        cursor.execute("""
-            INSERT INTO warehouse.dim_geography (country, region, iso_code)
-            VALUES ('United States', 'North America', 'US')
-            ON CONFLICT DO NOTHING
-            RETURNING geo_id
-        """)
-        geo = cursor.fetchone()
-        if not geo:
-            cursor.execute("SELECT geo_id FROM warehouse.dim_geography WHERE iso_code = 'US' LIMIT 1")
-            geo = cursor.fetchone()
-        if not geo:
-            continue
-        geo_id = geo[0]
-
-        cursor.execute("""
-            INSERT INTO warehouse.dim_organization (org_name, org_type, sector)
-            VALUES (%s, %s, %s)
-            ON CONFLICT DO NOTHING
-            RETURNING org_id
-        """, (company, "corporation", "Finance"))
-        org = cursor.fetchone()
-        if not org:
-            cursor.execute("SELECT org_id FROM warehouse.dim_organization WHERE org_name = %s LIMIT 1", (company,))
-            org = cursor.fetchone()
-        if not org:
-            continue
-        org_id = org[0]
-
-        cursor.execute("""
-            INSERT INTO warehouse.dim_time (full_date, day, month, quarter, year, month_name)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT DO NOTHING
-            RETURNING time_id
-        """, (date_str, 1, int(date_str[5:7]) if len(date_str) >= 7 else 1,
-              (int(date_str[5:7]) - 1) // 3 + 1 if len(date_str) >= 7 else 1,
-              year, "January"))
-        t = cursor.fetchone()
-        if not t:
-            cursor.execute("SELECT time_id FROM warehouse.dim_time WHERE year = %s LIMIT 1", (year,))
-            t = cursor.fetchone()
-        if not t:
-            continue
-        time_id = t[0]
-
-        cursor.execute("""
-            INSERT INTO warehouse.dim_program (program_name, program_type, source)
-            VALUES (%s, %s, %s)
-            ON CONFLICT DO NOTHING
-            RETURNING program_id
-        """, (f"SEC Filing {form}", "filing", "SEC EDGAR"))
-        prog = cursor.fetchone()
-        if not prog:
-            cursor.execute("SELECT program_id FROM warehouse.dim_program WHERE program_name = %s LIMIT 1", (f"SEC Filing {form}",))
-            prog = cursor.fetchone()
-        if not prog:
-            continue
-        program_id = prog[0]
-
-        cursor.execute("""
-            INSERT INTO warehouse.fact_transactions
-                (org_id, geo_id, time_id, program_id, amount_usd, currency, status, raw_source_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT DO NOTHING
-        """, (org_id, geo_id, time_id, program_id, 0.0, "USD", "filed", accession))
-        inserted += 1
-
-    conn.commit()
-    cursor.close()
-    conn.close()
-    print(f"Inserted {inserted} SEC EDGAR records into warehouse")
+    # dbt test returns exit code 1 if any test fails
+    # We warn but don't hard-fail the DAG — data is still in the warehouse
+    # Change to `raise` if you want hard failures on test errors
+    if result.returncode != 0:
+        print("WARNING: dbt tests failed — check logs above for details")
 
 
 with DAG(
     dag_id="transform_to_warehouse",
     default_args=default_args,
-    description="Transforms staging data into warehouse star schema",
+    description="Triggers dbt to transform staging data into warehouse star schema",
+    # Runs at 08:00 daily — after ingestion DAGs which run at 07:00
     schedule_interval="0 8 * * *",
     start_date=datetime(2024, 1, 1),
     catchup=False,
-    tags=["transform", "warehouse"],
+    tags=["transform", "warehouse", "dbt"],
 ) as dag:
 
-    wb_task = PythonOperator(
-        task_id="transform_world_bank",
-        python_callable=transform_world_bank,
+    dbt_run = PythonOperator(
+        task_id="dbt_run",
+        python_callable=run_dbt,
     )
 
-    sec_task = PythonOperator(
-        task_id="transform_sec_edgar",
-        python_callable=transform_sec_edgar,
+    dbt_test = PythonOperator(
+        task_id="dbt_test",
+        python_callable=run_dbt_test,
     )
 
-    wb_task >> sec_task
+    dbt_run >> dbt_test

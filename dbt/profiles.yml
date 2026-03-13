@@ -3,10 +3,27 @@ findata:
   outputs:
     dev:
       type: postgres
+
+      # host comes from env var, defaults to "postgres" (the Docker service name)
+      # inside Docker network, services talk to each other by service name
+      # so "postgres" resolves to the postgres container automatically
       host: "{{ env_var('POSTGRES_HOST', 'postgres') }}"
+
+      # port as integer — the | int filter converts the string env var to int
+      # dbt requires an integer here, not a string
       port: "{{ env_var('POSTGRES_PORT', '5432') | int }}"
+
       dbname: "{{ env_var('POSTGRES_DB') }}"
       user: "{{ env_var('POSTGRES_USER') }}"
       password: "{{ env_var('POSTGRES_PASSWORD') }}"
-      schema: public
+
+      # Changed from "public" to "warehouse"
+      # This is the fallback schema for models without a +schema override
+      # With our generate_schema_name macro, models that DO have +schema
+      # (like marts) will use that directly — so this only affects
+      # anything that falls through without an explicit schema
+      schema: warehouse
+
+      # threads = how many models dbt runs in parallel
+      # 4 is safe for local PostgreSQL
       threads: 4

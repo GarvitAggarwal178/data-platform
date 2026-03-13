@@ -21,6 +21,10 @@ dbt/logs/
 # Great Expectations
 data_quality/great_expectations/uncommitted/
 
+# Node
+node_modules/
+frontend/dist/
+
 # Docker
 *.log
 

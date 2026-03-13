@@ -1,0 +1,66 @@
+version: 2
+
+models:
+  - name: stg_world_bank
+    description: >
+      Cleaned and normalised World Bank project records.
+      Unpacks the JSONB raw_payload into typed columns.
+      One row per World Bank project.
+    columns:
+      - name: project_id
+        description: World Bank project ID (e.g. P123456)
+        tests:
+          - not_null
+          # unique test: no two rows should have the same project_id
+          # catches duplicate ingestion bugs
+          - unique
+
+      - name: amount_usd
+        description: Approved project amount in USD
+        tests:
+          - not_null
+
+      - name: country_name
+        description: Recipient country name
+        tests:
+          - not_null
+
+      - name: source
+        description: Always "World Bank" for this model
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["World Bank"]
+
+  - name: stg_sec_edgar
+    description: >
+      Cleaned SEC EDGAR filing records.
+      One row per filing accession number.
+    columns:
+      - name: project_id
+        description: SEC accession number — unique filing identifier
+        tests:
+          - not_null
+          - unique
+
+      - name: source
+        description: Always "SEC EDGAR" for this model
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["SEC EDGAR"]
+
+  - name: stg_oecd
+    description: >
+      Cleaned OECD ODA (Official Development Assistance) records.
+      Unpacked from SDMX-JSON format into individual observation rows.
+    columns:
+      - name: project_id
+        description: Synthetic key — "OECD-{observation_index}"
+        tests:
+          - not_null
+
+      - name: amount_usd
+        description: Aid flow amount in USD
+        tests:
+          - not_null

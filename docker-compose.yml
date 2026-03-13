@@ -47,6 +47,7 @@ services:
       - ./airflow/dags:/opt/airflow/dags
       - ./data_quality:/opt/airflow/data_quality
       - ./airflow/entrypoint.sh:/entrypoint.sh
+      - ./dbt:/opt/airflow/dbt    
     networks:
       - findata_net
     entrypoint: ["/bin/bash", "/entrypoint.sh"]
