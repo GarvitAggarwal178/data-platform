@@ -36,6 +36,7 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__SECRET_KEY: "findata_secret_key_123"
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
@@ -44,22 +45,10 @@ services:
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./data_quality:/opt/airflow/data_quality
+      - ./airflow/entrypoint.sh:/entrypoint.sh
     networks:
       - findata_net
-    command: >
-      bash -c "
-        airflow db migrate &&
-        airflow users create
-          --username admin
-          --password admin
-          --firstname Admin
-          --lastname User
-          --role Admin
-          --email admin@example.com
-          --skip-if-exists &&
-        airflow scheduler &
-        airflow webserver
-      "
+    entrypoint: ["/bin/bash", "/entrypoint.sh"]
 
   dbt:
     image: ghcr.io/dbt-labs/dbt-postgres:1.7.0
@@ -75,8 +64,6 @@ services:
     working_dir: /usr/app/dbt
     networks:
       - findata_net
-    # dbt runs once and exits — it's not a long-running service
-    # run it manually: docker-compose run dbt dbt run
     profiles:
       - dbt
 
@@ -93,11 +80,6 @@ services:
       - ./api:/app
     networks:
       - findata_net
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
 
   frontend:
     build: ./frontend
