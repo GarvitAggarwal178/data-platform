@@ -6,6 +6,7 @@ networks:
 
 volumes:
   postgres_data:
+  metabase_data:
 
 services:
   postgres:
@@ -87,5 +88,20 @@ services:
       - api
     ports:
       - "3000:3000"
+    networks:
+      - findata_net
+
+  metabase:
+    image: metabase/metabase:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Metabase's own internal app database — separate from findata
+      MB_DB_TYPE: h2
+    ports:
+      - "3001:3000"
+    volumes:
+      - metabase_data:/metabase-data
     networks:
       - findata_net

@@ -1,5 +1,16 @@
 with transactions as (
-    select * from {{ ref('int_transactions_unioned') }}
+    select
+        *,
+        row_number() over (
+            partition by project_id, source
+            order by ingested_at desc
+        ) as rn
+    from {{ ref('int_transactions_unioned') }}
+),
+
+-- keep only the most recent record per project+source
+deduped as (
+    select * from transactions where rn = 1
 ),
 
 geo as (
@@ -30,7 +41,7 @@ final as (
         1.0             as exchange_rate,
         t.status,
         t.project_id    as raw_source_id
-    from transactions t
+    from deduped t
     left join geo g
         on g.country = t.country_name
         and g.region = t.region_name

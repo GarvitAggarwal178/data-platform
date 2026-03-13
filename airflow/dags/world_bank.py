@@ -2,13 +2,9 @@ import requests
 import json
 import psycopg2
 import os
-import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-
-sys.path.insert(0, "/opt/airflow/data_quality")
-from checkpoints.run_checkpoint import validate_world_bank
 
 default_args = {
     "owner": "airflow",
@@ -43,14 +39,24 @@ def fetch_world_bank_data(**context):
 def validate_data(**context):
     project_list = context["ti"].xcom_pull(key="projects", task_ids="fetch_world_bank_data")
 
-    passed = validate_world_bank(project_list)
+    if not project_list or len(project_list) == 0:
+        raise ValueError("No records returned from World Bank API")
 
-    if not passed:
-        # raising an exception fails the task, Airflow marks it red in the UI
-        # and will retry based on default_args — then alert if still failing
-        raise ValueError("World Bank data failed quality validation. Halting pipeline.")
+    errors = []
+    for i, p in enumerate(project_list):
+        if not p.get("id"):
+            errors.append(f"Row {i}: missing project id")
 
-    print("Validation passed")
+        raw_amount = p.get("totalamt", 0)
+        try:
+            float(str(raw_amount).replace(",", "").strip() or 0)
+        except (TypeError, ValueError):
+            errors.append(f"Row {i}: amount is not a number: {raw_amount}")
+
+    if errors:
+        raise ValueError(f"Validation failed with {len(errors)} errors:\n" + "\n".join(errors[:10]))
+
+    print(f"Validation passed — {len(project_list)} records look clean")
 
 
 def insert_to_staging(**context):
@@ -63,17 +69,39 @@ def insert_to_staging(**context):
     conn = get_db_conn()
     cursor = conn.cursor()
 
-    insert_query = """
-        INSERT INTO staging.raw_world_bank (raw_payload, ingested_at)
-        VALUES (%s, %s)
-    """
-    rows = [(json.dumps(project), datetime.utcnow()) for project in project_list]
-    cursor.executemany(insert_query, rows)
+    # get existing project IDs already in staging — skip duplicates
+    cursor.execute("SELECT raw_payload->>'id' FROM staging.raw_world_bank")
+    existing_ids = {row[0] for row in cursor.fetchall()}
+    print(f"Found {len(existing_ids)} existing project IDs in staging")
+
+    new_projects = [p for p in project_list if p.get("id") not in existing_ids]
+    print(f"New projects to insert: {len(new_projects)}")
+
+    if not new_projects:
+        print("No new data — skipping insert")
+        cursor.close()
+        conn.close()
+        return
+
+    rows = [(json.dumps(p), datetime.now(timezone.utc)) for p in new_projects]
+    cursor.executemany(
+        "INSERT INTO staging.raw_world_bank (raw_payload, ingested_at) VALUES (%s, %s)",
+        rows
+    )
+
+    # update ingestion log
+    cursor.execute("""
+        INSERT INTO staging.ingestion_log (source, last_ingested_at, rows_inserted)
+        VALUES ('world_bank', %s, %s)
+        ON CONFLICT (source) DO UPDATE
+            SET last_ingested_at = EXCLUDED.last_ingested_at,
+                rows_inserted    = EXCLUDED.rows_inserted
+    """, (datetime.now(timezone.utc), len(rows)))
 
     conn.commit()
     cursor.close()
     conn.close()
-    print(f"Inserted {len(rows)} rows into staging.raw_world_bank")
+    print(f"Inserted {len(rows)} new rows into staging.raw_world_bank")
 
 
 with DAG(
@@ -101,6 +129,4 @@ with DAG(
         python_callable=insert_to_staging,
     )
 
-    # now the pipeline is: fetch → validate → insert
-    # if validate raises, insert never runs
     fetch_task >> validate_task >> insert_task
