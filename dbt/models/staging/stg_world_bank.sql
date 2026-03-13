@@ -10,7 +10,6 @@ cleaned as (
         raw_payload->>'countryname'                 as country_name,
         raw_payload->>'countryshortname'            as country_code,
         raw_payload->>'regionname'                  as region_name,
-        raw_payload->>'sector1'                     as sector_raw,
         -- sector is a nested object, pull just the name
         raw_payload->'sector1'->>'Name'             as sector_name,
         raw_payload->>'status'                      as status,
