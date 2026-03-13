@@ -1,0 +1,18 @@
+name: findata
+version: "1.0.0"
+config-version: 2
+
+profile: findata
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+
+models:
+  findata:
+    staging:
+      +materialized: view      # staging models are views — cheap, always fresh
+    intermediate:
+      +materialized: ephemeral # ephemeral = just a CTE, not stored in DB at all
+    marts:
+      +materialized: table     # final models are physical tables — fast to query
+      +schema: warehouse       # writes into the warehouse schema

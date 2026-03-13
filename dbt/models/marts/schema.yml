@@ -1,0 +1,46 @@
+version: 2
+
+models:
+  - name: fact_transactions
+    columns:
+      - name: transaction_id
+        tests:
+          - unique
+          - not_null
+      - name: amount_usd
+        tests:
+          - not_null
+
+  - name: dim_geography
+    columns:
+      - name: geo_id
+        tests:
+          - unique
+          - not_null
+      - name: country
+        tests:
+          - not_null
+
+  - name: dim_organization
+    columns:
+      - name: org_id
+        tests:
+          - unique
+          - not_null
+
+  - name: dim_time
+    columns:
+      - name: time_id
+        tests:
+          - unique
+          - not_null
+      - name: full_date
+        tests:
+          - not_null
+
+  - name: dim_program
+    columns:
+      - name: program_id
+        tests:
+          - unique
+          - not_null
