@@ -151,11 +151,6 @@ Interactive docs: `http://localhost:8000/docs`
 
 Returns API health status.
 
-**Response**
-```json
-{ "status": "ok" }
-```
-
 ---
 
 ### Transactions
@@ -164,81 +159,11 @@ Returns API health status.
 
 Returns a paginated list of transactions joined with all dimension tables.
 
-**Query Parameters**
-
-| Parameter | Type | Description |
-|---|---|---|
-| `country` | `string` | Filter by country name (partial match) |
-| `sector` | `string` | Filter by sector (partial match) |
-| `year` | `integer` | Filter by year e.g. `2024` |
-| `min_amount` | `float` | Minimum transaction amount in USD |
-| `max_amount` | `float` | Maximum transaction amount in USD |
-| `source` | `string` | Data source: `World Bank`, `OECD`, `SEC EDGAR` |
-| `limit` | `integer` | Max records to return (default: `100`, max: `1000`) |
-| `offset` | `integer` | Pagination offset (default: `0`) |
-
-**Example**
-```bash
-curl "http://localhost:8000/api/v1/transactions?source=World+Bank&year=2024&limit=10"
-```
-
-**Response**
-```json
-{
-  "data": [
-    {
-      "transaction_id": "40478293c1b567a1c4530723784e51da",
-      "amount_usd": 240000000,
-      "currency": "USD",
-      "status": "active",
-      "raw_source_id": "P123456",
-      "country": "India",
-      "region": "South Asia",
-      "org_name": "Ministry of Finance, India",
-      "sector": "Infrastructure",
-      "full_date": "2024-03-15",
-      "year": 2024,
-      "quarter": 1,
-      "program_name": "India Infrastructure Development Project",
-      "source": "World Bank"
-    }
-  ],
-  "count": 1
-}
-```
-
 ---
 
 #### `GET /api/v1/transactions/summary`
 
 Returns aggregated totals grouped by sector, source, and year. Used by the dashboard charts.
-
-**Query Parameters**
-
-| Parameter | Type | Description |
-|---|---|---|
-| `country` | `string` | Filter by country name |
-| `year` | `integer` | Filter by year |
-
-**Example**
-```bash
-curl "http://localhost:8000/api/v1/transactions/summary"
-```
-
-**Response**
-```json
-{
-  "data": [
-    {
-      "sector": "Infrastructure",
-      "source": "World Bank",
-      "year": 2024,
-      "total_amount": 21011460000,
-      "transaction_count": 101
-    }
-  ]
-}
-```
 
 ---
 
@@ -247,21 +172,6 @@ curl "http://localhost:8000/api/v1/transactions/summary"
 #### `GET /api/v1/geography/countries`
 
 Returns a list of all unique countries in the warehouse.
-
-**Example**
-```bash
-curl "http://localhost:8000/api/v1/geography/countries"
-```
-
-**Response**
-```json
-{
-  "data": [
-    { "country": "India", "region": "South Asia" },
-    { "country": "Nigeria", "region": "Sub-Saharan Africa" }
-  ]
-}
-```
 
 ---
 
@@ -380,52 +290,6 @@ docker-compose run --rm dbt source freshness
 
 ---
 
-## Project Structure
-
-```
-data-platform/
-├── airflow/
-│   ├── dags/
-│   │   ├── world_bank.py          # World Bank ingestion DAG
-│   │   ├── sec_edgar.py           # SEC EDGAR ingestion DAG
-│   │   ├── oecd.py                # OECD ingestion DAG
-│   │   └── transform.py           # dbt trigger DAG
-│   ├── Dockerfile
-│   ├── entrypoint.sh
-│   └── requirements.txt
-├── api/
-│   ├── routes/
-│   │   ├── transactions.py        # /api/v1/transactions endpoints
-│   │   └── geography.py           # /api/v1/geography endpoints
-│   ├── models.py                  # SQLAlchemy ORM models
-│   ├── database.py                # Async DB connection
-│   ├── main.py                    # FastAPI app + CORS config
-│   ├── Dockerfile
-│   └── requirements.txt
-├── database/
-│   └── init.sql                   # Creates staging + warehouse schemas on first run
-├── dbt/
-│   ├── models/
-│   │   ├── staging/
-│   │   ├── intermediate/
-│   │   └── marts/
-│   ├── dbt_project.yml
-│   └── profiles.yml
-├── frontend/
-│   ├── src/
-│   │   ├── api/client.js          # Axios instance — reads VITE_API_URL
-│   │   ├── hooks/                 # useTransactions, useSummary, useCountries
-│   │   ├── components/            # StatCard, TransactionsTable, charts
-│   │   └── App.jsx                # Main dashboard layout
-│   ├── Dockerfile                 # Multi-stage: Vite build → nginx serve
-│   ├── package.json
-│   └── vite.config.js
-├── data_quality/
-│   └── gx/                        # Great Expectations suites
-├── docker-compose.yml
-├── .env.example
-└── README.md
-```
 
 ---
 
