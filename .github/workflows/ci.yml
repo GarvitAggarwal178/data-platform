@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # GitHub Actions can spin up service containers alongside your job
+    # This is a real Postgres instance, not a mock
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: findata
+        ports:
+          - 5432:5432
+        # wait until postgres is actually ready before running steps
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: findata
+      DATABASE_URL: postgresql+asyncpg://admin:secret@localhost/findata
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install API dependencies
+        run: pip install -r api/requirements.txt
+
+      - name: Apply database schema
+        run: psql -h localhost -U admin -d findata -f database/init.sql
+        env:
+          PGPASSWORD: secret
+
+      - name: Install dbt
+        run: pip install dbt-postgres==1.7.0
+
+      - name: Run dbt
+        working-directory: dbt
+        run: |
+          dbt deps
+          dbt run --profiles-dir .
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: findata
+
+      - name: Run dbt tests
+        working-directory: dbt
+        run: dbt test --profiles-dir .
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: findata
+
+      - name: Run API tests
+        run: pytest api/tests/ -v
+        env:
+          DATABASE_URL: postgresql+asyncpg://admin:secret@localhost/findata

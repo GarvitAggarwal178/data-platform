@@ -5,3 +5,6 @@ sqlalchemy[asyncio]
 psycopg2-binary
 python-dotenv
 pydantic
+pytest
+pytest-asyncio
+httpx

@@ -1,5 +1,12 @@
 version: "3.9"
 
+networks:
+  findata_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+
 services:
   postgres:
     image: postgres:15
@@ -12,36 +19,91 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - findata_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   airflow:
     build: ./airflow
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "8080:8080"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./data_quality:/opt/airflow/data_quality
+    networks:
+      - findata_net
     command: >
-      bash -c "airflow db migrate &&
-               airflow users create --username admin --password admin
-               --firstname Admin --lastname User --role Admin --email admin@example.com &&
-               airflow webserver & airflow scheduler"
+      bash -c "
+        airflow db migrate &&
+        airflow users create
+          --username admin
+          --password admin
+          --firstname Admin
+          --lastname User
+          --role Admin
+          --email admin@example.com
+          --skip-if-exists &&
+        airflow scheduler &
+        airflow webserver
+      "
+
+  dbt:
+    image: ghcr.io/dbt-labs/dbt-postgres:1.7.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./dbt:/usr/app/dbt
+    working_dir: /usr/app/dbt
+    networks:
+      - findata_net
+    # dbt runs once and exits — it's not a long-running service
+    # run it manually: docker-compose run dbt dbt run
+    profiles:
+      - dbt
 
   api:
     build: ./api
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
     ports:
       - "8000:8000"
     volumes:
       - ./api:/app
+    networks:
+      - findata_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
 
-volumes:
-  postgres_data:
+  frontend:
+    build: ./frontend
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+    networks:
+      - findata_net
